@@ -1,0 +1,10 @@
+citHeader("To cite booami in publications use:")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "booami: Component-Wise Gradient Boosting After Multiple Imputations",
+  author  = person("Robert", "Kuchen"),
+  year    = "2025",
+  note    = "R package version 0.1.0",
+  url     = "https://arxiv.org/abs/2507.21807"
+)
