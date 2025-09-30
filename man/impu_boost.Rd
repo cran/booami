@@ -15,7 +15,7 @@ impu_boost(
   MIBoost = TRUE,
   pool = TRUE,
   pool_threshold = 0,
-  center = "auto"
+  center = c("auto", "force", "off")
 )
 }
 \arguments{
@@ -78,19 +78,20 @@ were provided), otherwise \code{NULL}.
 Applies component-wise gradient boosting to multiply imputed datasets.
 Depending on the settings, either a separate model is reported for each
 imputed dataset, or the M models are pooled to yield a single final model.
-For pooling, one can choose the algorithm \emph{MIBoost} (Boosting after
-Multiple Imputation), which enforces a uniform variable-selection scheme
-across all imputations, or the more conventional approaches of
-estimate-averaging and selection-frequency thresholding.
+For pooling, one can choose the novel \emph{MIBoost} algorithm, which enforces
+a uniform variable-selection scheme across all imputations, or the more
+conventional ad-hoc approaches of estimate-averaging and
+selection-frequency thresholding.
 }
 \details{
 This function supports \emph{MIBoost}, which enforces uniform variable
-selection across multiply imputed datasets. For full methodology, see the
-references below.
+selection across multiply imputed datasets.
+For full methodology, see Kuchen (2025).
 }
 \examples{
 \dontshow{if (requireNamespace("mice", quietly = TRUE) && requireNamespace("miceadds", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 \donttest{
+
   set.seed(123)
   utils::data(booami_sim)
 
@@ -133,19 +134,56 @@ references below.
   head(fit$BETA)
   fit$INT
 }
+
+\dontrun{
+# Heavier demo (more imputations and iterations; for local runs)
+
+  set.seed(2025)
+  utils::data(booami_sim)
+
+  M <- 10
+  n <- nrow(booami_sim)
+  x_cols <- grepl("^X\\\\d+$", names(booami_sim))
+
+  tr_idx <- sample(seq_len(n), floor(0.8 * n))
+  dat_tr <- booami_sim[tr_idx, , drop = FALSE]
+  dat_va <- booami_sim[-tr_idx, , drop = FALSE]
+
+  pm_tr <- mice::quickpred(dat_tr, method = "spearman",
+                           mincor = 0.20, minpuc = 0.40)
+
+  imp_tr <- mice::mice(dat_tr, m = M, predictorMatrix = pm_tr,
+                       maxit = 5, printFlag = TRUE)
+  imp_va <- mice::mice.mids(imp_tr, newdata = dat_va, maxit = 1, printFlag = FALSE)
+
+  X_list      <- vector("list", M)
+  y_list      <- vector("list", M)
+  X_list_val  <- vector("list", M)
+  y_list_val  <- vector("list", M)
+  for (m in seq_len(M)) {
+    tr_m <- mice::complete(imp_tr, m)
+    va_m <- mice::complete(imp_va, m)
+    X_list[[m]]     <- data.matrix(tr_m[, x_cols, drop = FALSE])
+    y_list[[m]]     <- tr_m$y
+    X_list_val[[m]] <- data.matrix(va_m[, x_cols, drop = FALSE])
+    y_list_val[[m]] <- va_m$y
+  }
+
+  fit_heavy <- impu_boost(
+    X_list, y_list,
+    X_list_val = X_list_val, y_list_val = y_list_val,
+    ny = 0.1, mstop = 250, type = "gaussian",
+    MIBoost = TRUE, pool = TRUE, center = "auto"
+  )
+  str(fit_heavy)
+}
 \dontshow{\}) # examplesIf}
 }
 \references{
-Buehlmann, P. and Hothorn, T. (2007). "Boosting Algorithms: Regularization,
-Prediction and Model Fitting." \doi{10.1214/07-STS242} \cr
-Friedman, J. H. (2001). "Greedy Function Approximation: A Gradient Boosting
-Machine." \doi{10.1214/aos/1013203451} \cr
-van Buuren, S. and Groothuis-Oudshoorn, K. (2011). "mice: Multivariate
-Imputation by Chained Equations in R." \doi{10.18637/jss.v045.i03} \cr
-Kuchen, R. (2025). "MIBoost: A Gradient Boosting Algorithm for Variable
-Selection After Multiple Imputation." \doi{10.48550/arXiv.2507.21807}
+Kuchen, R. (2025). \emph{MIBoost: A Gradient Boosting Algorithm for Variable
+Selection After Multiple Imputation}. arXiv:2507.21807.
+\doi{10.48550/arXiv.2507.21807} \url{https://arxiv.org/abs/2507.21807}.
 }
 \seealso{
-\code{\link{simulate_booami_data}},
-\code{\link{cv_boost_raw}}, \code{\link{cv_boost_imputed}}
+\code{\link{simulate_booami_data}}, \code{\link{cv_boost_raw}}, \code{\link{cv_boost_imputed}}
 }

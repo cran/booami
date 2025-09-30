@@ -234,10 +234,7 @@ simulate_booami_data <- function(
       mask <- stats::rbinom(n, 1, prob_miss) == 1
       df_miss[mask, paste0("X", j)] <- NA
     }
-    if (type == "gaussian") {
-      mask_y <- stats::rbinom(n, 1, prob_miss) == 1
-      df_miss[mask_y, "y"] <- NA
-    }
+
     df <- df_miss
 
   } else { # MCAR
@@ -248,9 +245,7 @@ simulate_booami_data <- function(
       mask <- stats::rbinom(n, 1, miss_prop) == 1
       df_miss[mask, paste0("X", j)] <- NA
     }
-    if (type == "gaussian") {
-      df_miss[stats::rbinom(n, 1, miss_prop) == 1, "y"] <- NA
-    }
+
     df <- df_miss
   }
 

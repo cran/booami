@@ -54,6 +54,8 @@
     center = center
   )
 
+  fit$CV_error <- NULL
+
   # Assemble return object
   out <- list(
     CV_error   = mean_cv_error,
