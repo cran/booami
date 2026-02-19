@@ -2,7 +2,7 @@ Package: booami
 Language: en-US
 Type: Package
 Title: Component-Wise Gradient Boosting after Multiple Imputation
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: 
     person("Robert", "Kuchen", email = "rokuchen@uni-mainz.de", 
            role = c("aut", "cre"))
@@ -29,10 +29,10 @@ Suggests: mice, miceadds, Matrix, knitr, rmarkdown, testthat (>=
         3.0.0), spelling
 Config/testthat/edition: 3
 RoxygenNote: 7.3.2
-LazyData: true
+LazyData: TRUE
 NeedsCompilation: no
-Packaged: 2025-09-30 14:04:09 UTC; rokuchen
+Packaged: 2026-02-19 14:46:02 UTC; rokuchen
 Author: Robert Kuchen [aut, cre]
 Maintainer: Robert Kuchen <rokuchen@uni-mainz.de>
 Repository: CRAN
-Date/Publication: 2025-09-30 14:40:02 UTC
+Date/Publication: 2026-02-19 15:10:07 UTC

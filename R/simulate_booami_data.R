@@ -3,7 +3,8 @@
 #' Generates a dataset with \eqn{p} predictors, of which the first \code{p_inf}
 #' are informative. Predictors are drawn from a multivariate normal with a chosen
 #' correlation structure, and the outcome can be continuous (\code{type = "gaussian"})
-#' or binary (\code{type = "logistic"}). Missing values are introduced via MAR or MCAR.
+#' or binary (\code{type = "logistic"}). Missing values are introduced in the
+#' predictors via MAR or MCAR; the outcome \code{y} is always fully observed (no NAs).
 #'
 #' \strong{Correlation structures:}
 #' \itemize{
@@ -15,7 +16,7 @@
 #'   \item \code{"none"}: independent predictors.
 #' }
 #'
-#' \strong{Missingness:}
+#' \strong{Missingness (predictors only):}
 #' \itemize{
 #'   \item \code{"MAR"}: for each row, a logit missingness score is computed from the
 #'         selected MAR drivers (see \code{mar_drivers}, \code{gamma_vec}, \code{mar_scale});
@@ -23,9 +24,9 @@
 #'         (otherwise \code{qlogis(miss_prop)}),
 #'         and per-row jitter \eqn{N(0, jitter_sd)} adds heterogeneity. The resulting probability
 #'         is used to mask predictors (except those in \code{keep_observed} and—if \code{keep_mar_drivers = TRUE}—the drivers themselves).
-#'         For \code{type = "gaussian"} only, \code{y} is also subject to the same missingness mechanism.
+#'         The outcome \code{y} is not masked.
 #'   \item \code{"MCAR"}: each predictor (except those in \code{keep_observed}) is masked independently with probability \code{miss_prop}.
-#'         For \code{type = "gaussian"} only, \code{y} is also masked MCAR with probability \code{miss_prop}.
+#'         The outcome \code{y} is not masked.
 #' }
 #'
 #' \emph{Note:} In the simulation, missingness probabilities are computed using the
@@ -68,7 +69,9 @@
 #'
 #' @return A \code{list} with elements:
 #' \itemize{
-#'   \item \code{data}: \code{data.frame} with columns \code{X1..Xp} and \code{y}, containing \code{NA}s per the missingness mechanism.
+#'   \item \code{data}: \code{data.frame} with columns \code{X1..Xp} and \code{y}.
+#'         Missing values are introduced in the predictors \code{X1..Xp}; \code{y}
+#'         is fully observed.
 #'   \item \code{beta}: numeric length-\code{p} vector of true coefficients (non-zeros in the first \code{p_inf} positions).
 #'   \item \code{informative}: integer vector \code{1:p_inf}.
 #'   \item \code{type}: character, outcome type (\code{"gaussian"} or \code{"logistic"}).
@@ -106,6 +109,7 @@
 #' d <- sim$data
 #' dim(d)
 #' mean(colSums(is.na(d)) > 0)    # fraction of columns with any NAs
+#' sum(is.na(d$y))                # should be 0
 #' head(attr(d, "true_beta"))
 #' attr(d, "informative")
 #'
@@ -123,6 +127,7 @@
 #'   type = "logistic", miss = "MCAR", miss_prop = 0.15
 #' )
 #' table(sim3$data$y, useNA = "ifany")
+#' sum(is.na(sim3$data$y))        # should be 0
 #'
 #' \donttest{
 #' utils::data(booami_sim)
@@ -186,7 +191,7 @@ simulate_booami_data <- function(
   beta <- numeric(p)
   beta[seq_len(p_inf)] <- stats::runif(p_inf, min = beta_range[1], max = beta_range[2])
 
-  # Outcome
+  # Outcome (always fully observed)
   eta <- as.vector(intercept + X %*% beta)
   if (type == "gaussian") {
     y <- eta + stats::rnorm(n, sd = noise_sd)
@@ -196,7 +201,7 @@ simulate_booami_data <- function(
   }
   df <- data.frame(X, y = y, check.names = FALSE)
 
-  # Missingness
+  # Missingness (predictors only)
   if (miss == "MAR") {
     drivers <- mar_drivers[mar_drivers >= 1 & mar_drivers <= p]
     if (length(drivers) == 0) stop("mar_drivers indices must be within 1..p.")
@@ -269,6 +274,7 @@ simulate_booami_data <- function(
     intercept = intercept
   )
 }
+
 
 
 

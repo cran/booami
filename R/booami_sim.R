@@ -1,8 +1,9 @@
 #' Example dataset for 'booami' (Gaussian, MAR)
 #'
 #' A simulated dataset with predictors \code{X1}...\code{X25} and a continuous
-#' outcome \code{y}, with missing values generated under a MAR mechanism. The
-#' object is a \code{data.frame} and carries attributes describing the
+#' outcome \code{y}. Missing values are generated under a MAR mechanism in the
+#' predictors (covariates) only; the outcome \code{y} is fully observed (no NAs).
+#' The object is a \code{data.frame} and carries attributes describing the
 #' data-generating process (true coefficients, informative indices, etc.).
 #'
 #' @format A data frame with 300 rows and 26 variables:
@@ -32,7 +33,7 @@
 #'   \item{X23}{numeric}
 #'   \item{X24}{numeric}
 #'   \item{X25}{numeric}
-#'   \item{y}{numeric outcome}
+#'   \item{y}{numeric outcome (fully observed)}
 #' }
 #'
 #' @details
@@ -54,6 +55,7 @@
 #' utils::data(booami_sim)
 #' dim(booami_sim)
 #' mean(colSums(is.na(booami_sim)) > 0)  # fraction of columns with any NAs
+#' sum(is.na(booami_sim$y))              # should be 0
 #' head(attr(booami_sim, "true_beta"))
 #' attr(booami_sim, "informative")
 #' ## }
@@ -64,3 +66,4 @@
 #' @name booami_sim
 #' @docType data
 NULL
+

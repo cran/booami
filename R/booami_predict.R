@@ -169,3 +169,7 @@ booami_predict <- function(object, X_new,
 
   out
 }
+
+
+
+

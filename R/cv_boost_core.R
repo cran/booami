@@ -22,7 +22,7 @@
   p <- ncol(X1); stopifnot(is.finite(p), p >= 1)
 
   if (isTRUE(show_progress)) {
-    cat(sprintf("Cross-validation over %d folds...\n", k));
+    cat(sprintf("Cross-validation over %d folds...\n", k))
     utils::flush.console()
   }
 
@@ -74,6 +74,8 @@
       names(fm) <- c("(Intercept)", pred_names)
     }
     out$final_model <- fm
+
+    # centering info (pooled)
     if (!is.null(fit$center_means)) out$center_means <- fit$center_means
   } else {
     M <- length(fit$INT)
@@ -86,9 +88,17 @@
       fm_list[[m]] <- fm
     }
     out$final_models <- fm_list
-    if (!is.null(fit$center_means_list)) out$center_means_list <- fit$center_means_list
+
+    # centering info (unpooled): accept either list or single vector
+    if (!is.null(fit$center_means_list)) {
+      out$center_means_list <- fit$center_means_list
+    } else if (!is.null(fit$center_means)) {
+      out$center_means <- fit$center_means
+      out$center_means_list <- rep(list(fit$center_means), M)
+    }
   }
 
   out
 }
+
 

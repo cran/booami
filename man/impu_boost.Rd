@@ -79,7 +79,7 @@ Applies component-wise gradient boosting to multiply imputed datasets.
 Depending on the settings, either a separate model is reported for each
 imputed dataset, or the M models are pooled to yield a single final model.
 For pooling, one can choose the novel \emph{MIBoost} algorithm, which enforces
-a uniform variable-selection scheme across all imputations, or the more
+a uniform variable-selection scheme across all imputed datasets, or the more
 conventional ad-hoc approaches of estimate-averaging and
 selection-frequency thresholding.
 }
@@ -136,7 +136,7 @@ For full methodology, see Kuchen (2025).
 }
 
 \dontrun{
-# Heavier demo (more imputations and iterations; for local runs)
+# Heavier demo (more imputed datasets and iterations; for local runs)
 
   set.seed(2025)
   utils::data(booami_sim)

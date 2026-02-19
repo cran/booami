@@ -2,7 +2,7 @@
 % Please edit documentation in R/cv_boost.R
 \name{cv_boost_imputed}
 \alias{cv_boost_imputed}
-\title{Cross-validated boosting on already-imputed data}
+\title{Cross-validation for boosting after multiple imputation (pre-imputed inputs)}
 \usage{
 cv_boost_imputed(
   X_train_list,
@@ -78,13 +78,17 @@ selection-frequency thresholding.}
 \item{show_progress}{Logical; print fold-level progress and summary timings.
 Default \code{TRUE}.}
 
-\item{center}{One of \code{c("auto", "off", "force")}. Controls
-centering of \code{X} within each imputed dataset.
+\item{center}{One of \code{c("auto", "off", "force")}. Controls centering of
+\code{X}.
 With \code{"auto"} (recommended), centering is applied only if the training
-matrix is not already centered. With \code{"force"}, centering is always
-applied. With \code{"off"}, centering is skipped. If \code{X_val_list} is
-provided, validation sets are centered using the means from the
-corresponding training set.}
+data are not already centered (checked across imputations). With
+\code{"force"}, centering is always applied. With \code{"off"}, centering
+is skipped.
+
+If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+computed from the training imputations in the corresponding fold and then
+subtracted from \emph{all} imputed training and validation matrices in that
+fold (and analogously for the final model fit on \code{X_full}).}
 }
 \value{
 A list with:
@@ -96,20 +100,16 @@ cross-validated loss across folds (and imputations).
 \item \code{final_model}: numeric vector of length \code{1 + p} containing
 the intercept followed by \eqn{p} coefficients of the final pooled
 model fitted at \code{best_mstop} on \code{X_full}/\code{y_full}.
+\item \code{center_means}: (optional) numeric vector of length \eqn{p}
+containing the centering means used for \code{X} (when available).
 }
 }
 \description{
-Performs k-fold cross-validation for \code{\link{impu_boost}} to determine
-the optimal value of \code{mstop} before fitting the final model on the
-full dataset. This function should only be used when data have already
-been imputed. In most cases, it is preferable to provide unimputed data
-and use \code{\link{cv_boost_raw}} instead.
-}
-\details{
 To avoid data leakage, each CV fold should first be split into training and
 validation subsets, after which imputation is performed. For the final model,
 all data should be imputed independently.
-
+}
+\details{
 The recommended workflow is illustrated in the examples.
 
 Centering affects only \code{X}; \code{y} is left unchanged. For
@@ -123,7 +123,15 @@ imputations and then over folds.
   set.seed(123)
   utils::data(booami_sim)
   k <- 2; M <- 2
-  n <- nrow(booami_sim); p <- ncol(booami_sim) - 1
+
+  # Separate X and y; drop missing y (policy)
+  X_all <- booami_sim[, 1:25, drop = FALSE]
+  y_all <- booami_sim[, 26]
+  keep <- !is.na(y_all)
+  X_all <- X_all[keep, , drop = FALSE]
+  y_all <- y_all[keep]
+
+  n <- nrow(X_all); p <- ncol(X_all)
   folds <- sample(rep(seq_len(k), length.out = n))
 
   X_train_list <- vector("list", k)
@@ -134,32 +142,34 @@ imputations and then over folds.
   for (cv in seq_len(k)) {
     tr <- folds != cv
     va <- !tr
-    dat_tr <- booami_sim[tr, , drop = FALSE]
-    dat_va <- booami_sim[va, , drop = FALSE]
-    pm_tr  <- mice::quickpred(dat_tr, method = "spearman", mincor = 0.30, minpuc = 0.60)
-    imp_tr <- mice::mice(dat_tr, m = M, predictorMatrix = pm_tr, maxit = 1, printFlag = FALSE)
-    imp_va <- mice::mice.mids(imp_tr, newdata = dat_va, maxit = 1, printFlag = FALSE)
+    Xtr <- X_all[tr, , drop = FALSE]; ytr <- y_all[tr]
+    Xva <- X_all[va, , drop = FALSE]; yva <- y_all[va]
+
+    # Impute X only (y is never used for imputation)
+    pm_tr  <- mice::quickpred(Xtr, method = "spearman", mincor = 0.30, minpuc = 0.60)
+    imp_tr <- mice::mice(Xtr, m = M, predictorMatrix = pm_tr, maxit = 1, printFlag = FALSE)
+    imp_va <- mice::mice.mids(imp_tr, newdata = Xva, maxit = 1, printFlag = FALSE)
+
     X_train_list[[cv]] <- vector("list", M)
     y_train_list[[cv]] <- vector("list", M)
-
     X_val_list[[cv]]   <- vector("list", M)
     y_val_list[[cv]]   <- vector("list", M)
+
     for (m in seq_len(M)) {
       tr_m <- mice::complete(imp_tr, m)
       va_m <- mice::complete(imp_va, m)
-      X_train_list[[cv]][[m]] <- data.matrix(tr_m[, 1:p, drop = FALSE])
-      y_train_list[[cv]][[m]] <- tr_m$y
-      X_val_list[[cv]][[m]]   <- data.matrix(va_m[, 1:p, drop = FALSE])
-      y_val_list[[cv]][[m]]   <- va_m$y
+      X_train_list[[cv]][[m]] <- data.matrix(tr_m)
+      y_train_list[[cv]][[m]] <- ytr
+      X_val_list[[cv]][[m]]   <- data.matrix(va_m)
+      y_val_list[[cv]][[m]]   <- yva
     }
   }
 
-  pm_full  <- mice::quickpred(booami_sim, method = "spearman", mincor = 0.30, minpuc = 0.60)
-  imp_full <- mice::mice(booami_sim, m = M, predictorMatrix = pm_full, maxit = 1, printFlag = FALSE)
-  X_full <- lapply(seq_len(M),
-  function(m) data.matrix(
-  mice::complete(imp_full, m)[, 1:p, drop = FALSE]))
-  y_full <- lapply(seq_len(M), function(m) mice::complete(imp_full, m)$y)
+  # Full-data imputations (X only)
+  pm_full  <- mice::quickpred(X_all, method = "spearman", mincor = 0.30, minpuc = 0.60)
+  imp_full <- mice::mice(X_all, m = M, predictorMatrix = pm_full, maxit = 1, printFlag = FALSE)
+  X_full <- lapply(seq_len(M), function(m) data.matrix(mice::complete(imp_full, m)))
+  y_full <- lapply(seq_len(M), function(m) y_all)
 
   res <- cv_boost_imputed(
     X_train_list, y_train_list,
@@ -169,45 +179,56 @@ imputations and then over folds.
     MIBoost = TRUE, pool = TRUE, center = "auto",
     show_progress = FALSE
   )
-\dontshow{invisible(utils::capture.output(str(res)))}
+  \dontshow{invisible(utils::capture.output(str(res)))}
 }
 
 \donttest{
   set.seed(2025)
   utils::data(booami_sim)
   k <- 5; M <- 10
-  n <- nrow(booami_sim); p <- ncol(booami_sim) - 1
+
+  X_all <- booami_sim[, 1:25, drop = FALSE]
+  y_all <- booami_sim[, 26]
+  keep <- !is.na(y_all)
+  X_all <- X_all[keep, , drop = FALSE]
+  y_all <- y_all[keep]
+
+  n <- nrow(X_all); p <- ncol(X_all)
   folds <- sample(rep(seq_len(k), length.out = n))
 
   X_train_list <- vector("list", k)
   y_train_list <- vector("list", k)
   X_val_list   <- vector("list", k)
   y_val_list   <- vector("list", k)
+
   for (cv in seq_len(k)) {
     tr <- folds != cv; va <- !tr
-    dat_tr <- booami_sim[tr, , drop = FALSE]
-    dat_va <- booami_sim[va, , drop = FALSE]
-    pm_tr  <- mice::quickpred(dat_tr, method = "spearman", mincor = 0.20, minpuc = 0.40)
-    imp_tr <- mice::mice(dat_tr, m = M, predictorMatrix = pm_tr, maxit = 5, printFlag = TRUE)
-    imp_va <- mice::mice.mids(imp_tr, newdata = dat_va, maxit = 1, printFlag = FALSE)
+    Xtr <- X_all[tr, , drop = FALSE]; ytr <- y_all[tr]
+    Xva <- X_all[va, , drop = FALSE]; yva <- y_all[va]
+
+    pm_tr  <- mice::quickpred(Xtr, method = "spearman", mincor = 0.20, minpuc = 0.40)
+    imp_tr <- mice::mice(Xtr, m = M, predictorMatrix = pm_tr, maxit = 5, printFlag = TRUE)
+    imp_va <- mice::mice.mids(imp_tr, newdata = Xva, maxit = 1, printFlag = FALSE)
+
     X_train_list[[cv]] <- vector("list", M)
     y_train_list[[cv]] <- vector("list", M)
     X_val_list[[cv]]   <- vector("list", M)
     y_val_list[[cv]]   <- vector("list", M)
+
     for (m in seq_len(M)) {
-      tr_m <- mice::complete(imp_tr, m); va_m <- mice::complete(imp_va, m)
-      X_train_list[[cv]][[m]] <- data.matrix(tr_m[, 1:p, drop = FALSE])
-      y_train_list[[cv]][[m]] <- tr_m$y
-      X_val_list[[cv]][[m]]   <- data.matrix(va_m[, 1:p, drop = FALSE])
-      y_val_list[[cv]][[m]]   <- va_m$y
+      tr_m <- mice::complete(imp_tr, m)
+      va_m <- mice::complete(imp_va, m)
+      X_train_list[[cv]][[m]] <- data.matrix(tr_m)
+      y_train_list[[cv]][[m]] <- ytr
+      X_val_list[[cv]][[m]]   <- data.matrix(va_m)
+      y_val_list[[cv]][[m]]   <- yva
     }
   }
-  pm_full  <- mice::quickpred(booami_sim, method = "spearman", mincor = 0.20, minpuc = 0.40)
-  imp_full <- mice::mice(booami_sim, m = M, predictorMatrix = pm_full, maxit = 5, printFlag = TRUE)
-  X_full <- lapply(seq_len(M),
-  function(m) data.matrix(mice::complete(imp_full, m)[, 1:p, drop = FALSE]))
-  y_full <- lapply(seq_len(M),
-  function(m) mice::complete(imp_full, m)$y)
+
+  pm_full  <- mice::quickpred(X_all, method = "spearman", mincor = 0.20, minpuc = 0.40)
+  imp_full <- mice::mice(X_all, m = M, predictorMatrix = pm_full, maxit = 5, printFlag = TRUE)
+  X_full <- lapply(seq_len(M), function(m) data.matrix(mice::complete(imp_full, m)))
+  y_full <- lapply(seq_len(M), function(m) y_all)
 
   res_heavy <- cv_boost_imputed(
     X_train_list, y_train_list,

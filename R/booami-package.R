@@ -18,13 +18,20 @@
 #'
 #' ## Cross-validation without leakage
 #' \pkg{booami} implements a leakage-avoiding CV protocol:
-#' data are first split into training and validation subsets; training data are
-#' multiply imputed; validation data are imputed using the **training** imputation
-#' models; and centering uses training means. Errors are averaged across
-#' imputations and folds to select the optimal number of boosting iterations
-#' (\code{mstop}). Use \code{\link{cv_boost_raw}} for raw data with missing values
-#' (imputation inside CV), or \code{\link{cv_boost_imputed}} when imputed datasets
-#' are already prepared.
+#' data are first split into training and validation subsets; the training
+#' covariates are multiply imputed; validation covariates are imputed using the
+#' **training** imputation models; and (if enabled) centering uses a fold-specific
+#' grand mean \eqn{\mu_\star} computed from the training imputations and applied
+#' consistently to all imputed training and validation matrices. Errors are
+#' averaged across imputations and folds to select the optimal number of boosting
+#' iterations (\code{mstop}). Use \code{\link{cv_boost_raw}} for raw data with
+#' missing covariates (imputation inside CV), or \code{\link{cv_boost_imputed}}
+#' when imputed datasets are already prepared.
+#'
+#' \strong{Note:} In the recommended predictive workflow implemented by
+#' \code{cv_boost_raw()}, rows with missing outcomes \code{y} are removed before
+#' fold assignment, and the outcome is not used for imputation (covariates \code{X}
+#' are imputed without including \code{y} as a predictor).
 #'
 #' ## Key features
 #' - **MIBoost (uniform selection):** Joint base-learner selection via aggregated
@@ -34,20 +41,21 @@
 #'   selection-frequency thresholding.
 #' - **Flexible losses and learners:** Supports Gaussian and logistic losses with
 #'   component-wise base-learners; extensible to other learners.
-#' - **Leakage-safe CV:** Training/validation split → train-only imputation →
-#'   training-mean centering → error aggregation across imputations.
+#' - **Leakage-safe CV:** Training/validation split → train-only imputation of
+#'   covariates → fold-wise grand-mean centering (\eqn{\mu_\star}) → error
+#'   aggregation across imputations and folds.
 #'
 #' ## Main functions
 #' - \code{\link{impu_boost}} — Core routine implementing **MIBoost** as well as
 #'   per-dataset boosting with pooling.
 #' - \code{\link{cv_boost_raw}} — Leakage-safe k-fold CV starting from a single
-#'   dataset with missing values (imputation performed inside each fold).
+#'   dataset with missing covariates (imputation performed inside each fold).
 #' - \code{\link{cv_boost_imputed}} — CV when imputed datasets (and splits) are
 #'   already available.
 #'
 #' ## Typical workflow
-#' 1. **Raw data with missingness:** use \code{cv_boost_raw()} to impute within
-#'    folds, select \code{mstop}, and fit the final model.
+#' 1. **Raw data with missing covariates:** use \code{cv_boost_raw()} to impute
+#'    within folds, select \code{mstop}, and fit the final model.
 #' 2. **Already imputed datasets:** use \code{cv_boost_imputed()} to select
 #'    \code{mstop} and fit.
 #' 3. **Direct control:** call \code{impu_boost()} when you want to run

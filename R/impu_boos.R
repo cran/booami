@@ -4,7 +4,7 @@
 #' Depending on the settings, either a separate model is reported for each
 #' imputed dataset, or the M models are pooled to yield a single final model.
 #' For pooling, one can choose the novel \emph{MIBoost} algorithm, which enforces
-#' a uniform variable-selection scheme across all imputations, or the more
+#' a uniform variable-selection scheme across all imputed datasets, or the more
 #' conventional ad-hoc approaches of estimate-averaging and
 #' selection-frequency thresholding.
 #'
@@ -109,7 +109,7 @@
 #' }
 #'
 #' \dontrun{
-#' # Heavier demo (more imputations and iterations; for local runs)
+#' # Heavier demo (more imputed datasets and iterations; for local runs)
 #'
 #'   set.seed(2025)
 #'   utils::data(booami_sim)
@@ -165,31 +165,17 @@ impu_boost <- function(X_list, y_list,
   center <- match.arg(center)
 
   # ---------- helpers ----------
-  to_mat <- function(x) { if (!is.matrix(x)) x <- data.matrix(x); storage.mode(x) <- "double"; x }
+  to_mat <- function(x) {
+    if (!is.matrix(x)) x <- data.matrix(x)
+    storage.mode(x) <- "double"
+    x
+  }
   is_centered <- function(X) {
     mu  <- colMeans(X)
     sds <- apply(X, 2, function(v) suppressWarnings(stats::sd(v)))
     sds[!is.finite(sds) | sds <= 0] <- 1
     tol <- 1e-8 + 1e-6 * sds
     all(abs(mu) <= tol)
-  }
-  center_pair <- function(Xtr, Xva, mode) {
-    Xtr <- to_mat(Xtr); Xva <- to_mat(Xva)
-    if (mode == "off") return(list(train = Xtr, val = Xva, mu = NULL, centered = FALSE))
-    need <- (mode == "force") || (!is_centered(Xtr))
-    if (!need) return(list(train = Xtr, val = Xva, mu = NULL, centered = FALSE))
-    mu <- colMeans(Xtr)
-    list(train = sweep(Xtr, 2, mu, "-"),
-         val   = sweep(Xva, 2, mu, "-"),
-         mu = mu, centered = TRUE)
-  }
-  center_single <- function(X, mode) {
-    X <- to_mat(X)
-    if (mode == "off") return(list(X = X, mu = NULL, centered = FALSE))
-    need <- (mode == "force") || (!is_centered(X))
-    if (!need) return(list(X = X, mu = NULL, centered = FALSE))
-    mu <- colMeans(X)
-    list(X = sweep(X, 2, mu, "-"), mu = mu, centered = TRUE)
   }
   has_bad <- function(z) any(!is.finite(z))
 
@@ -201,9 +187,9 @@ impu_boost <- function(X_list, y_list,
   # basic NA/Inf checks (helps catch upstream issues early)
   for (m in seq_len(M)) {
     if (has_bad(as.numeric(y_list[[m]])) || has_bad(as.numeric(if (has_val) y_list_val[[m]] else 0)))
-      stop(sprintf("Non-finite values in y for imputation %d.", m))
+      stop(sprintf("Non-finite values in y for imputed dataset %d.", m))
     if (has_bad(as.numeric(X_list[[m]])) || (has_val && has_bad(as.numeric(X_list_val[[m]]))))
-      stop(sprintf("Non-finite values in X for imputation %d.", m))
+      stop(sprintf("Non-finite values in X for imputed dataset %d.", m))
   }
 
   # logistic guard: responses must be 0/1
@@ -215,21 +201,38 @@ impu_boost <- function(X_list, y_list,
       stop("For type='logistic', all y_list_val elements must be coded 0/1 (no NAs).")
   }
 
-  # track per-imputation training means actually used for centering
-  mu_list <- vector("list", M)
-
-  # ---------- centering per imputation ----------
+  # ---------- centering with ONE grand mean across imputed datasets ----------
+  # Normalize X to numeric matrices first
   for (m in seq_len(M)) {
-    if (has_val) {
-      pair <- center_pair(X_list[[m]], X_list_val[[m]], mode = center)
-      X_list[[m]]     <- pair$train
-      X_list_val[[m]] <- pair$val
-      mu_list[[m]]    <- if (pair$centered) pair$mu else NULL
-    } else {
-      cs <- center_single(X_list[[m]], mode = center)
-      X_list[[m]]  <- cs$X
-      mu_list[[m]] <- if (cs$centered) cs$mu else NULL
+    X_list[[m]] <- to_mat(X_list[[m]])
+    if (has_val) X_list_val[[m]] <- to_mat(X_list_val[[m]])
+  }
+
+  need_center <- FALSE
+  if (center == "force") {
+    need_center <- TRUE
+  } else if (center == "auto") {
+    # If ANY training imputed dataset is not centered, center ALL by the same grand mean
+    need_center <- !all(vapply(X_list, is_centered, logical(1)))
+  } else { # "off"
+    need_center <- FALSE
+  }
+
+  mu_star <- NULL
+  if (need_center) {
+    MU <- do.call(cbind, lapply(X_list, colMeans))   # p x M
+    mu_star <- rowMeans(MU)                          # length p
+    # keep names if present
+    if (!is.null(colnames(X_list[[1L]]))) names(mu_star) <- colnames(X_list[[1L]])
+
+    for (m in seq_len(M)) {
+      X_list[[m]] <- sweep(X_list[[m]], 2, mu_star, "-")
+      if (has_val) X_list_val[[m]] <- sweep(X_list_val[[m]], 2, mu_star, "-")
     }
+  }
+
+  # y to numeric
+  for (m in seq_len(M)) {
     y_list[[m]] <- as.numeric(y_list[[m]])
     if (has_val) y_list_val[[m]] <- as.numeric(y_list_val[[m]])
   }
@@ -337,27 +340,6 @@ impu_boost <- function(X_list, y_list,
     INT  <- mean(INT)
   }
 
-  # ---------- compute returned center means ----------
-  center_info <- NULL
-  if (pool) {
-    any_mu <- which(vapply(mu_list, Negate(is.null), logical(1)))
-    if (length(any_mu)) {
-      proto <- mu_list[[ any_mu[1] ]]
-      MU <- do.call(cbind, lapply(seq_len(M), function(m) {
-        if (is.null(mu_list[[m]])) {
-          stats::setNames(rep(0, length(proto)), names(proto))
-        } else {
-          mu_list[[m]][names(proto)]
-        }
-      }))
-      center_info <- rowMeans(MU)
-    } else {
-      center_info <- NULL
-    }
-  } else {
-    center_info <- mu_list
-  }
-
   # ---------- assemble result ----------
   res <- list(
     INT = INT,
@@ -365,11 +347,14 @@ impu_boost <- function(X_list, y_list,
     CV_error = OOS_CV,
     type = type
   )
+
+  # Store the *actual* centering vector used (grand mean) for prediction-time reuse
   if (pool) {
-    if (!is.null(center_info)) res$center_means <- center_info
+    if (!is.null(mu_star)) res$center_means <- mu_star
     class(res) <- c("booami_pooled", "booami_fit", class(res))
   } else {
-    res$center_means_list <- center_info
+    # Backwards-compatible: keep a per-imputed dataset list, but all entries are the same mu_star (or NULL)
+    res$center_means_list <- rep(list(mu_star), M)
     class(res) <- c("booami_multi", "booami_fit", class(res))
   }
 

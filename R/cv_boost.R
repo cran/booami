@@ -1,10 +1,4 @@
-#' Cross-validated boosting on already-imputed data
-#'
-#' Performs k-fold cross-validation for \code{\link{impu_boost}} to determine
-#' the optimal value of \code{mstop} before fitting the final model on the
-#' full dataset. This function should only be used when data have already
-#' been imputed. In most cases, it is preferable to provide unimputed data
-#' and use \code{\link{cv_boost_raw}} instead.
+#' Cross-validation for boosting after multiple imputation (pre-imputed inputs)
 #'
 #' To avoid data leakage, each CV fold should first be split into training and
 #' validation subsets, after which imputation is performed. For the final model,
@@ -60,13 +54,17 @@
 #'   selection-frequency thresholding.
 #' @param show_progress Logical; print fold-level progress and summary timings.
 #'   Default \code{TRUE}.
-#' @param center One of \code{c("auto", "off", "force")}. Controls
-#'   centering of \code{X} within each imputed dataset.
+#' @param center One of \code{c("auto", "off", "force")}. Controls centering of
+#'   \code{X}.
 #'   With \code{"auto"} (recommended), centering is applied only if the training
-#'   matrix is not already centered. With \code{"force"}, centering is always
-#'   applied. With \code{"off"}, centering is skipped. If \code{X_val_list} is
-#'   provided, validation sets are centered using the means from the
-#'   corresponding training set.
+#'   data are not already centered (checked across imputations). With
+#'   \code{"force"}, centering is always applied. With \code{"off"}, centering
+#'   is skipped.
+#'
+#'   If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+#'   computed from the training imputations in the corresponding fold and then
+#'   subtracted from \emph{all} imputed training and validation matrices in that
+#'   fold (and analogously for the final model fit on \code{X_full}).
 #'
 #' @details
 #' Centering affects only \code{X}; \code{y} is left unchanged. For
@@ -83,6 +81,8 @@
 #'   \item \code{final_model}: numeric vector of length \code{1 + p} containing
 #'         the intercept followed by \eqn{p} coefficients of the final pooled
 #'         model fitted at \code{best_mstop} on \code{X_full}/\code{y_full}.
+#'   \item \code{center_means}: (optional) numeric vector of length \eqn{p}
+#'         containing the centering means used for \code{X} (when available).
 #' }
 #'
 #' @seealso \code{\link{impu_boost}}, \code{\link{cv_boost_raw}}
@@ -92,7 +92,15 @@
 #'   set.seed(123)
 #'   utils::data(booami_sim)
 #'   k <- 2; M <- 2
-#'   n <- nrow(booami_sim); p <- ncol(booami_sim) - 1
+#'
+#'   # Separate X and y; drop missing y (policy)
+#'   X_all <- booami_sim[, 1:25, drop = FALSE]
+#'   y_all <- booami_sim[, 26]
+#'   keep <- !is.na(y_all)
+#'   X_all <- X_all[keep, , drop = FALSE]
+#'   y_all <- y_all[keep]
+#'
+#'   n <- nrow(X_all); p <- ncol(X_all)
 #'   folds <- sample(rep(seq_len(k), length.out = n))
 #'
 #'   X_train_list <- vector("list", k)
@@ -103,32 +111,34 @@
 #'   for (cv in seq_len(k)) {
 #'     tr <- folds != cv
 #'     va <- !tr
-#'     dat_tr <- booami_sim[tr, , drop = FALSE]
-#'     dat_va <- booami_sim[va, , drop = FALSE]
-#'     pm_tr  <- mice::quickpred(dat_tr, method = "spearman", mincor = 0.30, minpuc = 0.60)
-#'     imp_tr <- mice::mice(dat_tr, m = M, predictorMatrix = pm_tr, maxit = 1, printFlag = FALSE)
-#'     imp_va <- mice::mice.mids(imp_tr, newdata = dat_va, maxit = 1, printFlag = FALSE)
+#'     Xtr <- X_all[tr, , drop = FALSE]; ytr <- y_all[tr]
+#'     Xva <- X_all[va, , drop = FALSE]; yva <- y_all[va]
+#'
+#'     # Impute X only (y is never used for imputation)
+#'     pm_tr  <- mice::quickpred(Xtr, method = "spearman", mincor = 0.30, minpuc = 0.60)
+#'     imp_tr <- mice::mice(Xtr, m = M, predictorMatrix = pm_tr, maxit = 1, printFlag = FALSE)
+#'     imp_va <- mice::mice.mids(imp_tr, newdata = Xva, maxit = 1, printFlag = FALSE)
+#'
 #'     X_train_list[[cv]] <- vector("list", M)
 #'     y_train_list[[cv]] <- vector("list", M)
-#'
 #'     X_val_list[[cv]]   <- vector("list", M)
 #'     y_val_list[[cv]]   <- vector("list", M)
+#'
 #'     for (m in seq_len(M)) {
 #'       tr_m <- mice::complete(imp_tr, m)
 #'       va_m <- mice::complete(imp_va, m)
-#'       X_train_list[[cv]][[m]] <- data.matrix(tr_m[, 1:p, drop = FALSE])
-#'       y_train_list[[cv]][[m]] <- tr_m$y
-#'       X_val_list[[cv]][[m]]   <- data.matrix(va_m[, 1:p, drop = FALSE])
-#'       y_val_list[[cv]][[m]]   <- va_m$y
+#'       X_train_list[[cv]][[m]] <- data.matrix(tr_m)
+#'       y_train_list[[cv]][[m]] <- ytr
+#'       X_val_list[[cv]][[m]]   <- data.matrix(va_m)
+#'       y_val_list[[cv]][[m]]   <- yva
 #'     }
 #'   }
 #'
-#'   pm_full  <- mice::quickpred(booami_sim, method = "spearman", mincor = 0.30, minpuc = 0.60)
-#'   imp_full <- mice::mice(booami_sim, m = M, predictorMatrix = pm_full, maxit = 1, printFlag = FALSE)
-#'   X_full <- lapply(seq_len(M),
-#'   function(m) data.matrix(
-#'   mice::complete(imp_full, m)[, 1:p, drop = FALSE]))
-#'   y_full <- lapply(seq_len(M), function(m) mice::complete(imp_full, m)$y)
+#'   # Full-data imputations (X only)
+#'   pm_full  <- mice::quickpred(X_all, method = "spearman", mincor = 0.30, minpuc = 0.60)
+#'   imp_full <- mice::mice(X_all, m = M, predictorMatrix = pm_full, maxit = 1, printFlag = FALSE)
+#'   X_full <- lapply(seq_len(M), function(m) data.matrix(mice::complete(imp_full, m)))
+#'   y_full <- lapply(seq_len(M), function(m) y_all)
 #'
 #'   res <- cv_boost_imputed(
 #'     X_train_list, y_train_list,
@@ -138,45 +148,56 @@
 #'     MIBoost = TRUE, pool = TRUE, center = "auto",
 #'     show_progress = FALSE
 #'   )
-#' \dontshow{invisible(utils::capture.output(str(res)))}
+#'   \dontshow{invisible(utils::capture.output(str(res)))}
 #' }
 #'
 #' \donttest{
 #'   set.seed(2025)
 #'   utils::data(booami_sim)
 #'   k <- 5; M <- 10
-#'   n <- nrow(booami_sim); p <- ncol(booami_sim) - 1
+#'
+#'   X_all <- booami_sim[, 1:25, drop = FALSE]
+#'   y_all <- booami_sim[, 26]
+#'   keep <- !is.na(y_all)
+#'   X_all <- X_all[keep, , drop = FALSE]
+#'   y_all <- y_all[keep]
+#'
+#'   n <- nrow(X_all); p <- ncol(X_all)
 #'   folds <- sample(rep(seq_len(k), length.out = n))
 #'
 #'   X_train_list <- vector("list", k)
 #'   y_train_list <- vector("list", k)
 #'   X_val_list   <- vector("list", k)
 #'   y_val_list   <- vector("list", k)
+#'
 #'   for (cv in seq_len(k)) {
 #'     tr <- folds != cv; va <- !tr
-#'     dat_tr <- booami_sim[tr, , drop = FALSE]
-#'     dat_va <- booami_sim[va, , drop = FALSE]
-#'     pm_tr  <- mice::quickpred(dat_tr, method = "spearman", mincor = 0.20, minpuc = 0.40)
-#'     imp_tr <- mice::mice(dat_tr, m = M, predictorMatrix = pm_tr, maxit = 5, printFlag = TRUE)
-#'     imp_va <- mice::mice.mids(imp_tr, newdata = dat_va, maxit = 1, printFlag = FALSE)
+#'     Xtr <- X_all[tr, , drop = FALSE]; ytr <- y_all[tr]
+#'     Xva <- X_all[va, , drop = FALSE]; yva <- y_all[va]
+#'
+#'     pm_tr  <- mice::quickpred(Xtr, method = "spearman", mincor = 0.20, minpuc = 0.40)
+#'     imp_tr <- mice::mice(Xtr, m = M, predictorMatrix = pm_tr, maxit = 5, printFlag = TRUE)
+#'     imp_va <- mice::mice.mids(imp_tr, newdata = Xva, maxit = 1, printFlag = FALSE)
+#'
 #'     X_train_list[[cv]] <- vector("list", M)
 #'     y_train_list[[cv]] <- vector("list", M)
 #'     X_val_list[[cv]]   <- vector("list", M)
 #'     y_val_list[[cv]]   <- vector("list", M)
+#'
 #'     for (m in seq_len(M)) {
-#'       tr_m <- mice::complete(imp_tr, m); va_m <- mice::complete(imp_va, m)
-#'       X_train_list[[cv]][[m]] <- data.matrix(tr_m[, 1:p, drop = FALSE])
-#'       y_train_list[[cv]][[m]] <- tr_m$y
-#'       X_val_list[[cv]][[m]]   <- data.matrix(va_m[, 1:p, drop = FALSE])
-#'       y_val_list[[cv]][[m]]   <- va_m$y
+#'       tr_m <- mice::complete(imp_tr, m)
+#'       va_m <- mice::complete(imp_va, m)
+#'       X_train_list[[cv]][[m]] <- data.matrix(tr_m)
+#'       y_train_list[[cv]][[m]] <- ytr
+#'       X_val_list[[cv]][[m]]   <- data.matrix(va_m)
+#'       y_val_list[[cv]][[m]]   <- yva
 #'     }
 #'   }
-#'   pm_full  <- mice::quickpred(booami_sim, method = "spearman", mincor = 0.20, minpuc = 0.40)
-#'   imp_full <- mice::mice(booami_sim, m = M, predictorMatrix = pm_full, maxit = 5, printFlag = TRUE)
-#'   X_full <- lapply(seq_len(M),
-#'   function(m) data.matrix(mice::complete(imp_full, m)[, 1:p, drop = FALSE]))
-#'   y_full <- lapply(seq_len(M),
-#'   function(m) mice::complete(imp_full, m)$y)
+#'
+#'   pm_full  <- mice::quickpred(X_all, method = "spearman", mincor = 0.20, minpuc = 0.40)
+#'   imp_full <- mice::mice(X_all, m = M, predictorMatrix = pm_full, maxit = 5, printFlag = TRUE)
+#'   X_full <- lapply(seq_len(M), function(m) data.matrix(mice::complete(imp_full, m)))
+#'   y_full <- lapply(seq_len(M), function(m) y_all)
 #'
 #'   res_heavy <- cv_boost_imputed(
 #'     X_train_list, y_train_list,
@@ -298,14 +319,19 @@ cv_boost_imputed <- function(
 #' stopping iteration.
 #'
 #' @details
-#' Within each CV fold, the data are first split into a training subset and a
-#' validation subset. The training subset is multiply imputed \eqn{M} times
-#' using \pkg{mice}, producing \eqn{M} imputed training datasets. Covariates
-#' in each training dataset are centered. The corresponding validation subset
-#' is then imputed \eqn{M} times using the imputation models learned from the
-#' training imputations, ensuring consistency between training and validation.
-#' These validation datasets are centered using the variable means from their
-#' associated training datasets.
+#' Rows with missing outcomes \code{y} are removed before fold assignment.
+#' Within each CV fold, the remaining data are first split into a training subset
+#' and a validation subset. Multiple imputation is then performed on the
+#' covariates \code{X} only (the outcome is never imputed and is not used as a
+#' predictor in the imputation models). The training covariates are multiply
+#' imputed \eqn{M} times using \pkg{mice}, producing \eqn{M} imputed training
+#' datasets. The corresponding validation covariates are then imputed \eqn{M}
+#' times using the imputation models learned from the training data (leakage-avoiding).
+#'
+#' If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+#' computed from the imputed training covariates in the corresponding fold and
+#' subtracted from \emph{all} imputed training and validation covariate matrices
+#' in that fold.
 #'
 #' \code{\link{impu_boost}} is run on the imputed training datasets for up to
 #' \code{mstop} boosting iterations. At each iteration, prediction errors are
@@ -314,10 +340,10 @@ cv_boost_imputed <- function(
 #' averaged across folds. The optimal stopping iteration is chosen as the
 #' \code{mstop} value minimizing the mean CV error.
 #'
-#' Finally, the full dataset is multiply imputed \eqn{M} times and centered
-#' independently within each imputed dataset. \code{\link{impu_boost}} is
-#' applied to these datasets for the selected number of boosting iterations to
-#' obtain the final model.
+#' Finally, the full covariate matrix \code{X} is multiply imputed \eqn{M} times.
+#' If centering is applied, it uses a grand mean \eqn{\mu_\star} computed across
+#' the \eqn{M} full-data imputations. \code{\link{impu_boost}} is applied to these
+#' datasets for the selected number of boosting iterations to obtain the final model.
 #'
 #' \strong{Imputation control.} All key \pkg{mice} settings can be passed via
 #' \code{impute_args} (a named list forwarded to \code{mice::mice()}) and/or
@@ -325,14 +351,13 @@ cv_boost_imputed <- function(
 #' Internally, the function builds a full default method vector from the actual
 #' data given to \code{mice()}, then \emph{merges} any user-supplied entries
 #' by name. \emph{The names in \code{impute_method} must exactly match the
-#' column names in \code{data.frame(y = y, X)} (i.e., the data passed
-#' to \code{mice()}).} Partial vectors are allowed; variables not listed fall
-#' back to defaults; unknown names are ignored with a warning. The function sets
-#' and may override \code{data}, \code{method} (after merging overrides),
-#' \code{predictorMatrix}, and \code{ignore} (to enforce train-only learning).
-#' Predictor matrices can be built with \code{mice::quickpred()} (see
-#' \code{use_quickpred}, \code{quickpred_args}) or with
-#' \code{mice::make.predictorMatrix()}.
+#' column names in \code{X} (i.e., the data passed to \code{mice()}).} Partial
+#' vectors are allowed; variables not listed fall back to defaults; unknown names
+#' are ignored with a warning. The function sets and may override \code{data},
+#' \code{method} (after merging overrides), \code{predictorMatrix}, and
+#' \code{ignore} (to enforce train-only learning). Predictor matrices can be built
+#' with \code{mice::quickpred()} (see \code{use_quickpred}, \code{quickpred_args})
+#' or with \code{mice::make.predictorMatrix()}.
 #'
 #' @references
 #' Kuchen, R. (2025). \emph{MIBoost: A Gradient Boosting Algorithm for Variable
@@ -340,12 +365,15 @@ cv_boost_imputed <- function(
 #' \doi{10.48550/arXiv.2507.21807} \url{https://arxiv.org/abs/2507.21807}.
 #'
 #' @param X A data.frame or matrix of predictors of size \eqn{n \times p}
-#'   containing missing values. Column names are preserved. If no missing values
-#'   are present in \code{X} or \code{y}, use
+#'   containing missing values. Column names are preserved. Rows with missing
+#'   outcomes \code{y} are removed before CV. If no missing values are present in
+#'   \code{X} after removing missing-\code{y} rows, use
 #'   \code{\link{cv_boost_imputed}} instead.
 #' @param y A vector of length \eqn{n} with the outcome (numeric for
 #'   \code{type = "gaussian"}; numeric \code{0/1} or a 2-level factor for
-#'   \code{type = "logistic"}). Must align with \code{X} rows.
+#'   \code{type = "logistic"}). Must align with \code{X} rows. Rows with missing
+#'   \code{y} are removed before CV. The outcome is never imputed and is not used
+#'   as a predictor in imputation models.
 #' @param k Number of cross-validation folds. Default is \code{5}.
 #' @param ny Learning rate. Defaults to \code{0.1}.
 #' @param mstop Maximum number of boosting iterations to evaluate during
@@ -376,15 +404,13 @@ cv_boost_imputed <- function(
 #'   override any values supplied here. If \code{m} is missing, a default of
 #'   \code{10} is used.
 #' @param impute_method Optional \emph{named} character vector passed to
-#'   \code{mice::mice(method = ...)} to control per-variable methods
-#'   (e.g., \code{"pmm"}, \code{"logreg"}). This may be a \emph{partial}
-#'   vector: entries are merged by name into a full default method vector
-#'   derived from the data; unmatched names are ignored with a warning.
-#'   If \code{NULL} (default), numeric columns use \code{"pmm"}; for
-#'   \code{type = "logistic"}, the outcome uses \code{"logreg"} (coerced to a
-#'   2-level factor if needed).
+#'   \code{mice::mice(method = ...)} to control per-variable methods for
+#'   covariates \code{X} (e.g., \code{"pmm"}, \code{"logreg"}). This may be a
+#'   \emph{partial} vector: entries are merged by name into a full default method
+#'   vector derived from \code{X}; unmatched names are ignored with a warning.
+#'   If \code{NULL} (default), numeric covariates use \code{"pmm"}.
 #' @param use_quickpred Logical. If \code{TRUE} (default), build the
-#'   \code{predictorMatrix} via \code{mice::quickpred()} on the training data
+#'   \code{predictorMatrix} via \code{mice::quickpred()} on the training covariates
 #'   within each fold; otherwise use \code{mice::make.predictorMatrix()}.
 #' @param quickpred_args A named list of arguments forwarded to
 #'   \code{mice::quickpred()} (e.g., \code{mincor}, \code{minpuc},
@@ -400,12 +426,16 @@ cv_boost_imputed <- function(
 #'   full-data imputations used for the final fit as
 #'   \code{$full_imputations = list(X = <list length m>, y = <list length m>)}.
 #'   Default is \code{FALSE}.
-#' @param center One of \code{c("auto", "off", "force")}. Controls
-#'   centering of \code{X} within each imputed dataset.
-#'   With \code{"auto"} (recommended), centering is applied only if the training
-#'   matrix is not already centered. With \code{"force"}, centering is always
-#'   applied. With \code{"off"}, centering is skipped. Validation sets are
-#'   always centered using the means from the corresponding training set.
+#' @param center One of \code{c("auto", "off", "force")}. Controls centering of
+#'   \code{X}. With \code{"auto"} (recommended), centering is applied only if the
+#'   training data are not already centered (checked across imputations). With
+#'   \code{"force"}, centering is always applied. With \code{"off"}, centering is
+#'   skipped.
+#'
+#'   If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+#'   computed from the imputed training covariates in the corresponding fold and
+#'   subtracted from all imputed training and validation matrices in that fold
+#'   (and analogously for the final model fit on the full-data imputations).
 #'
 #' @return A list with:
 #' \itemize{
@@ -437,10 +467,9 @@ cv_boost_imputed <- function(
 #'     mstop = 50,
 #'     show_progress = FALSE
 #'   )
-#'   \dontshow{invisible(utils::capture.output(str(res)))}
 #'
-#'   # Partial custom imputation method override
-#'   meth <- c(y = "pmm", X1 = "pmm")
+#'   # Partial custom imputation method override (X variables only)
+#'   meth <- c(X1 = "pmm")
 #'   res2 <- cv_boost_raw(
 #'     X = X, y = y,
 #'     k = 2, seed = 123,
@@ -477,8 +506,43 @@ cv_boost_raw <- function(
   if (length(y) != nrow(X))
     stop("Length of y must match nrow(X).")
 
-  if (!anyNA(X) && !anyNA(y))
-    stop("Data have no missing values. Use cv_boost_imputed().")
+  # --- drop rows with missing y (so y is never imputed, and cannot be used) ---
+  keep <- !is.na(y)
+  if (!any(keep)) stop("All rows have missing y; nothing to fit.")
+  if (any(!keep) && isTRUE(show_progress)) {
+    cat(sprintf("Dropping %d rows with missing y...\n", sum(!keep)))
+  }
+  X <- X[keep, , drop = FALSE]
+  y <- y[keep]
+
+  # after dropping missing y, ensure y is finite
+  if (any(!is.finite(as.numeric(y)))) stop("Non-finite values in y after dropping NAs.")
+
+  # logistic guard: must be 0/1 with no NAs
+  if (type == "logistic") {
+    y_num <- as.numeric(y)
+    if (!all(y_num %in% c(0, 1))) {
+      # also allow factor levels "0"/"1" etc.
+      if (is.factor(y) || is.character(y)) {
+        y_num2 <- suppressWarnings(as.numeric(as.character(y)))
+        if (!all(is.finite(y_num2)) || !all(y_num2 %in% c(0, 1))) {
+          stop("For type='logistic', y must be coded 0/1 (no NAs).")
+        }
+        y <- y_num2
+      } else {
+        stop("For type='logistic', y must be coded 0/1 (no NAs).")
+      }
+    } else {
+      y <- y_num
+    }
+  } else {
+    y <- as.numeric(y)
+  }
+
+  # Now we only care whether X has missingness
+  if (!anyNA(X)) {
+    stop("After removing missing y, X has no missing values. Use cv_boost_imputed() (or a complete-data variant).")
+  }
 
   if (!("ignore" %in% names(formals(mice::mice))))
     stop("Update 'mice': need 'ignore' in mice().")
@@ -486,9 +550,8 @@ cv_boost_raw <- function(
   n <- nrow(X)
 
   # --- folds: reproducible WITHOUT altering the user's RNG state
-  # --- folds: reproducible WITHOUT altering the user's RNG state
   folds_id <- withr::with_preserve_seed({
-    seq_rep <- rep(seq_len(k), length.out = n)   # <- renamed
+    seq_rep <- rep(seq_len(k), length.out = n)
     if (is.null(seed)) {
       sample(seq_rep)
     } else {
@@ -496,27 +559,24 @@ cv_boost_raw <- function(
     }
   })
 
-  # (Optional but recommended) ensure `pool` stayed logical
   if (!is.logical(pool) || length(pool) != 1L) {
     stop("'pool' must be a single TRUE/FALSE.")
   }
 
-  # base seed for mice: respect user's impute_args$seed if present
   seed_base_mice <- if (!is.null(impute_args$seed)) impute_args$seed else seed
-
   get_m <- function() if (!is.null(impute_args$m)) impute_args$m else 10L
 
-  build_methods <- function(dat) {
-    meth <- mice::make.method(dat)
-    is_num <- vapply(dat, is.numeric, logical(1L))
+  # methods builder (NO y column here)
+  build_methods_X <- function(datX) {
+    meth <- mice::make.method(datX)
+    is_num <- vapply(datX, is.numeric, logical(1L))
     meth[is_num] <- "pmm"
-    if ("y" %in% names(dat)) {
-      meth["y"] <- if (type == "gaussian") "pmm" else "logreg"
-    }
+
+    # allow user override for X columns
     if (!is.null(impute_method)) {
       nm <- intersect(names(impute_method), names(meth))
       if (length(nm) == 0L) {
-        warning("None of the names in 'impute_method' matched the data columns; overrides ignored.")
+        warning("None of the names in 'impute_method' matched the X columns; overrides ignored.")
       } else {
         meth[nm] <- impute_method[nm]
       }
@@ -524,13 +584,8 @@ cv_boost_raw <- function(
     meth
   }
 
-  as01 <- function(y) {
-    if (is.factor(y) || is.character(y)) return(as.numeric(as.character(y)))
-    as.numeric(y)
-  }
-
   m <- get_m()
-  if (isTRUE(show_progress)) cat(sprintf("MI-in-CV: %d folds  x  %d imputations...\n", k, m))
+  if (isTRUE(show_progress)) cat(sprintf("MI-in-CV (no y in imputation): %d folds  x  %d imputations...\n", k, m))
 
   X_train_list <- vector("list", k); y_train_list <- vector("list", k)
   X_val_list   <- vector("list", k); y_val_list   <- vector("list", k)
@@ -540,24 +595,21 @@ cv_boost_raw <- function(
     Xtr <- X[tr_idx, , drop = FALSE]; ytr <- y[tr_idx]
     Xva <- X[va_idx, , drop = FALSE]; yva <- y[va_idx]
 
-    dat_tr  <- data.frame(y = ytr, Xtr, check.names = FALSE)
-    dat_va  <- data.frame(y = yva, Xva, check.names = FALSE)
+    # IMPORTANT: impute only X (no y column at all)
+    dat_tr  <- Xtr
+    dat_va  <- Xva
     dat_all <- rbind(dat_tr, dat_va)
     ntr <- nrow(dat_tr)
 
     if (isTRUE(use_quickpred)) {
-      qp <- quickpred_args; qp <- qp[!vapply(qp, is.null, logical(1))]
+      qp <- quickpred_args
+      qp <- qp[!vapply(qp, is.null, logical(1))]
       pm <- do.call(mice::quickpred, c(list(data = dat_tr), qp))
     } else {
       pm <- mice::make.predictorMatrix(dat_tr)
     }
 
-    if (type == "logistic" && is.numeric(dat_all$y) &&
-        all(stats::na.omit(dat_all$y) %in% c(0,1))) {
-      dat_all$y <- factor(dat_all$y, levels = c(0,1))
-    }
-
-    meth <- build_methods(dat_all)
+    meth <- build_methods_X(dat_all)
 
     ignore_vec <- c(rep(FALSE, ntr), rep(TRUE, nrow(dat_va)))
     args <- utils::modifyList(impute_args, list(
@@ -566,15 +618,15 @@ cv_boost_raw <- function(
       predictorMatrix = pm,
       ignore = ignore_vec
     ), keep.null = TRUE)
+
     if (is.null(args$m)) args$m <- m
-    # seed: use user's base if provided, else ours; offset per fold
     if (is.null(args$seed)) {
       args$seed <- seed_base_mice + i
     } else {
       args$seed <- args$seed + i
     }
 
-    if (isTRUE(show_progress)) cat(sprintf("Fold %d: mice (m=%d)...\n", i, args$m))
+    if (isTRUE(show_progress)) cat(sprintf("Fold %d: mice on X only (m=%d)...\n", i, args$m))
     mids <- do.call(mice::mice, args)
 
     X_train_list[[i]] <- vector("list", args$m)
@@ -586,36 +638,37 @@ cv_boost_raw <- function(
       comp <- mice::complete(mids, action = j)
       comp_tr <- comp[seq_len(ntr), , drop = FALSE]
       comp_va <- comp[(ntr + 1):nrow(comp), , drop = FALSE]
-      X_train_list[[i]][[j]] <- data.matrix(comp_tr[, setdiff(names(comp_tr), "y"), drop = FALSE])
-      X_val_list[[i]][[j]]   <- data.matrix(comp_va[, setdiff(names(comp_va), "y"), drop = FALSE])
-      y_train_list[[i]][[j]] <- if (type == "logistic") as01(comp_tr[["y"]]) else comp_tr[["y"]]
-      y_val_list[[i]][[j]]   <- if (type == "logistic") as01(comp_va[["y"]]) else comp_va[["y"]]
+
+      X_train_list[[i]][[j]] <- data.matrix(comp_tr)
+      X_val_list[[i]][[j]]   <- data.matrix(comp_va)
+
+      # y is NOT imputed; just replicate observed y per imputation
+      y_train_list[[i]][[j]] <- ytr
+      y_val_list[[i]][[j]]   <- yva
     }
   }
 
-  if (isTRUE(show_progress)) cat("Full-data imputations...\n")
-  dat_full <- data.frame(y = y, X, check.names = FALSE)
+  # --- Full-data imputations (again: X only, no y in mice) ---
+  if (isTRUE(show_progress)) cat("Full-data imputations (X only)...\n")
+  dat_full <- X
 
   if (isTRUE(use_quickpred)) {
-    qp <- quickpred_args; qp <- qp[!vapply(qp, is.null, logical(1))]
+    qp <- quickpred_args
+    qp <- qp[!vapply(qp, is.null, logical(1))]
     pm_full <- do.call(mice::quickpred, c(list(data = dat_full), qp))
   } else {
     pm_full <- mice::make.predictorMatrix(dat_full)
   }
 
-  if (type == "logistic" && is.numeric(dat_full$y) && all(na.omit(dat_full$y) %in% c(0,1))) {
-    dat_full$y <- factor(dat_full$y, levels = c(0,1))
-  }
+  meth_full <- build_methods_X(dat_full)
 
-  meth_full <- build_methods(dat_full)
-
-  args_full <- modifyList(impute_args, list(
+  args_full <- utils::modifyList(impute_args, list(
     data = dat_full,
     method = meth_full,
     predictorMatrix = pm_full
   ), keep.null = TRUE)
+
   if (is.null(args_full$m)) args_full$m <- m
-  # seed for full-data imputations: offset far away but deterministic
   if (is.null(args_full$seed)) {
     args_full$seed <- seed_base_mice + 10^6
   } else {
@@ -623,12 +676,13 @@ cv_boost_raw <- function(
   }
 
   mids_full <- do.call(mice::mice, args_full)
+
   X_list <- vector("list", args_full$m)
   y_list <- vector("list", args_full$m)
   for (j in seq_len(args_full$m)) {
     comp_full <- mice::complete(mids_full, j)
-    X_list[[j]] <- data.matrix(comp_full[, setdiff(names(comp_full), "y"), drop = FALSE])
-    y_list[[j]] <- if (type == "logistic") as01(comp_full[["y"]]) else comp_full[["y"]]
+    X_list[[j]] <- data.matrix(comp_full)
+    y_list[[j]] <- y  # replicated observed y
   }
 
   if (isTRUE(show_progress))

@@ -28,13 +28,16 @@ cv_boost_raw(
 }
 \arguments{
 \item{X}{A data.frame or matrix of predictors of size \eqn{n \times p}
-containing missing values. Column names are preserved. If no missing values
-are present in \code{X} or \code{y}, use
+containing missing values. Column names are preserved. Rows with missing
+outcomes \code{y} are removed before CV. If no missing values are present in
+\code{X} after removing missing-\code{y} rows, use
 \code{\link{cv_boost_imputed}} instead.}
 
 \item{y}{A vector of length \eqn{n} with the outcome (numeric for
 \code{type = "gaussian"}; numeric \code{0/1} or a 2-level factor for
-\code{type = "logistic"}). Must align with \code{X} rows.}
+\code{type = "logistic"}). Must align with \code{X} rows. Rows with missing
+\code{y} are removed before CV. The outcome is never imputed and is not used
+as a predictor in imputation models.}
 
 \item{k}{Number of cross-validation folds. Default is \code{5}.}
 
@@ -74,16 +77,14 @@ override any values supplied here. If \code{m} is missing, a default of
 \code{10} is used.}
 
 \item{impute_method}{Optional \emph{named} character vector passed to
-\code{mice::mice(method = ...)} to control per-variable methods
-(e.g., \code{"pmm"}, \code{"logreg"}). This may be a \emph{partial}
-vector: entries are merged by name into a full default method vector
-derived from the data; unmatched names are ignored with a warning.
-If \code{NULL} (default), numeric columns use \code{"pmm"}; for
-\code{type = "logistic"}, the outcome uses \code{"logreg"} (coerced to a
-2-level factor if needed).}
+\code{mice::mice(method = ...)} to control per-variable methods for
+covariates \code{X} (e.g., \code{"pmm"}, \code{"logreg"}). This may be a
+\emph{partial} vector: entries are merged by name into a full default method
+vector derived from \code{X}; unmatched names are ignored with a warning.
+If \code{NULL} (default), numeric covariates use \code{"pmm"}.}
 
 \item{use_quickpred}{Logical. If \code{TRUE} (default), build the
-\code{predictorMatrix} via \code{mice::quickpred()} on the training data
+\code{predictorMatrix} via \code{mice::quickpred()} on the training covariates
 within each fold; otherwise use \code{mice::make.predictorMatrix()}.}
 
 \item{quickpred_args}{A named list of arguments forwarded to
@@ -104,12 +105,16 @@ full-data imputations used for the final fit as
 \code{$full_imputations = list(X = <list length m>, y = <list length m>)}.
 Default is \code{FALSE}.}
 
-\item{center}{One of \code{c("auto", "off", "force")}. Controls
-centering of \code{X} within each imputed dataset.
-With \code{"auto"} (recommended), centering is applied only if the training
-matrix is not already centered. With \code{"force"}, centering is always
-applied. With \code{"off"}, centering is skipped. Validation sets are
-always centered using the means from the corresponding training set.}
+\item{center}{One of \code{c("auto", "off", "force")}. Controls centering of
+\code{X}. With \code{"auto"} (recommended), centering is applied only if the
+training data are not already centered (checked across imputations). With
+\code{"force"}, centering is always applied. With \code{"off"}, centering is
+skipped.
+
+If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+computed from the imputed training covariates in the corresponding fold and
+subtracted from all imputed training and validation matrices in that fold
+(and analogously for the final model fit on the full-data imputations).}
 }
 \value{
 A list with:
@@ -135,14 +140,19 @@ then fitted on multiple imputations of the full dataset at the selected
 stopping iteration.
 }
 \details{
-Within each CV fold, the data are first split into a training subset and a
-validation subset. The training subset is multiply imputed \eqn{M} times
-using \pkg{mice}, producing \eqn{M} imputed training datasets. Covariates
-in each training dataset are centered. The corresponding validation subset
-is then imputed \eqn{M} times using the imputation models learned from the
-training imputations, ensuring consistency between training and validation.
-These validation datasets are centered using the variable means from their
-associated training datasets.
+Rows with missing outcomes \code{y} are removed before fold assignment.
+Within each CV fold, the remaining data are first split into a training subset
+and a validation subset. Multiple imputation is then performed on the
+covariates \code{X} only (the outcome is never imputed and is not used as a
+predictor in the imputation models). The training covariates are multiply
+imputed \eqn{M} times using \pkg{mice}, producing \eqn{M} imputed training
+datasets. The corresponding validation covariates are then imputed \eqn{M}
+times using the imputation models learned from the training data (leakage-avoiding).
+
+If centering is applied, a single grand mean vector \eqn{\mu_\star} is
+computed from the imputed training covariates in the corresponding fold and
+subtracted from \emph{all} imputed training and validation covariate matrices
+in that fold.
 
 \code{\link{impu_boost}} is run on the imputed training datasets for up to
 \code{mstop} boosting iterations. At each iteration, prediction errors are
@@ -151,10 +161,10 @@ imputations. This yields an aggregated error curve per fold, which is then
 averaged across folds. The optimal stopping iteration is chosen as the
 \code{mstop} value minimizing the mean CV error.
 
-Finally, the full dataset is multiply imputed \eqn{M} times and centered
-independently within each imputed dataset. \code{\link{impu_boost}} is
-applied to these datasets for the selected number of boosting iterations to
-obtain the final model.
+Finally, the full covariate matrix \code{X} is multiply imputed \eqn{M} times.
+If centering is applied, it uses a grand mean \eqn{\mu_\star} computed across
+the \eqn{M} full-data imputations. \code{\link{impu_boost}} is applied to these
+datasets for the selected number of boosting iterations to obtain the final model.
 
 \strong{Imputation control.} All key \pkg{mice} settings can be passed via
 \code{impute_args} (a named list forwarded to \code{mice::mice()}) and/or
@@ -162,14 +172,13 @@ obtain the final model.
 Internally, the function builds a full default method vector from the actual
 data given to \code{mice()}, then \emph{merges} any user-supplied entries
 by name. \emph{The names in \code{impute_method} must exactly match the
-column names in \code{data.frame(y = y, X)} (i.e., the data passed
-to \code{mice()}).} Partial vectors are allowed; variables not listed fall
-back to defaults; unknown names are ignored with a warning. The function sets
-and may override \code{data}, \code{method} (after merging overrides),
-\code{predictorMatrix}, and \code{ignore} (to enforce train-only learning).
-Predictor matrices can be built with \code{mice::quickpred()} (see
-\code{use_quickpred}, \code{quickpred_args}) or with
-\code{mice::make.predictorMatrix()}.
+column names in \code{X} (i.e., the data passed to \code{mice()}).} Partial
+vectors are allowed; variables not listed fall back to defaults; unknown names
+are ignored with a warning. The function sets and may override \code{data},
+\code{method} (after merging overrides), \code{predictorMatrix}, and
+\code{ignore} (to enforce train-only learning). Predictor matrices can be built
+with \code{mice::quickpred()} (see \code{use_quickpred}, \code{quickpred_args})
+or with \code{mice::make.predictorMatrix()}.
 }
 \examples{
 \dontshow{if (requireNamespace("mice", quietly = TRUE) && requireNamespace("miceadds", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
@@ -186,10 +195,9 @@ Predictor matrices can be built with \code{mice::quickpred()} (see
     mstop = 50,
     show_progress = FALSE
   )
-  \dontshow{invisible(utils::capture.output(str(res)))}
 
-  # Partial custom imputation method override
-  meth <- c(y = "pmm", X1 = "pmm")
+  # Partial custom imputation method override (X variables only)
+  meth <- c(X1 = "pmm")
   res2 <- cv_boost_raw(
     X = X, y = y,
     k = 2, seed = 123,
