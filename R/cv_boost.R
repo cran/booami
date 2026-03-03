@@ -1,5 +1,11 @@
 #' Cross-validation for boosting after multiple imputation (pre-imputed inputs)
 #'
+#' Performs k-fold cross-validation for \code{\link{impu_boost}} to determine
+#' the optimal value of \code{mstop} before fitting the final model on the
+#' full dataset. This function should only be used when data have already
+#' been imputed. In most cases, it is preferable to provide unimputed data
+#' and use \code{\link{cv_boost_raw}} instead.
+#'
 #' To avoid data leakage, each CV fold should first be split into training and
 #' validation subsets, after which imputation is performed. For the final model,
 #' all data should be imputed independently.
@@ -315,8 +321,8 @@ cv_boost_imputed <- function(
 #' missing values. Within each fold, multiple imputation, centering, model
 #' fitting, and validation are performed in a leakage-avoiding manner to select
 #' the optimal number of boosting iterations (\code{mstop}). The final model is
-#' then fitted on multiple imputations of the full dataset at the selected
-#' stopping iteration.
+#' then fitted to the multiply imputed datasets derived from the full dataset
+#' at the selected stopping iteration.
 #'
 #' @details
 #' Rows with missing outcomes \code{y} are removed before fold assignment.

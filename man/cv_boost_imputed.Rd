@@ -105,11 +105,17 @@ containing the centering means used for \code{X} (when available).
 }
 }
 \description{
+Performs k-fold cross-validation for \code{\link{impu_boost}} to determine
+the optimal value of \code{mstop} before fitting the final model on the
+full dataset. This function should only be used when data have already
+been imputed. In most cases, it is preferable to provide unimputed data
+and use \code{\link{cv_boost_raw}} instead.
+}
+\details{
 To avoid data leakage, each CV fold should first be split into training and
 validation subsets, after which imputation is performed. For the final model,
 all data should be imputed independently.
-}
-\details{
+
 The recommended workflow is illustrated in the examples.
 
 Centering affects only \code{X}; \code{y} is left unchanged. For

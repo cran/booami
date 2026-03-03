@@ -1,10 +1,10 @@
-03affd6b64aaa5589a16abd62ced1a55 *DESCRIPTION
-43a4c0f4d8bf3c215c9d1e21b3bde561 *LICENSE
+b3e12bd53677c39ce1837229b6a72fcb *DESCRIPTION
+c88aaa8299656b2e6fa7e81d4cc9bec0 *LICENSE
 8ad2ad15692e2069d484efae7c2ee21a *NAMESPACE
 3c34955bdc4776f76289b79335b1aab4 *R/booami-package.R
 3091ef760cc1f4f01d639934b19dace8 *R/booami_predict.R
 8ec1511c5dd86d9dbbb39cffb3a7a838 *R/booami_sim.R
-43fd0cb84d051ca79068e55e664efad2 *R/cv_boost.R
+a42db962176808d0d595688cd689bc3e *R/cv_boost.R
 489f20a4d7cd4cf4f9c88fe13cab26f3 *R/cv_boost_core.R
 230a73c9517b305772727a7e1b08134f *R/impu_boos.R
 0742222ebd658b53b49e7530d1d36d91 *R/predict-s3.R
@@ -17,8 +17,8 @@ b54db8794555342c4feee5fe0b1b8f5b *build/partial.rdb
 ab26cdfb77b65ac5a9862c46cca378b6 *man/booami-package.Rd
 689810292b5b2240e4fe7009c1aefed9 *man/booami_predict.Rd
 837a1e1dfb086ca1162792bdb587a230 *man/booami_sim.Rd
-55ce18477494c00550024753909cef1f *man/cv_boost_imputed.Rd
-2b2a35b866827a3c51a2bab546297c7b *man/cv_boost_raw.Rd
+79e52750673d239c86e61afdbf5098ba *man/cv_boost_imputed.Rd
+08c434128302384cb5ac2a156343c743 *man/cv_boost_raw.Rd
 c4e4f7a7ef3eb302cc97660cc1d51a91 *man/impu_boost.Rd
 b4d0cc81ad7ec56ff2ce6a5a8b2fd54a *man/predict.booami.Rd
 92de579fcfb775d54257db6925b60671 *man/simulate_booami_data.Rd

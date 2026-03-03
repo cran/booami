@@ -136,8 +136,8 @@ Performs k-fold cross-validation for \code{\link{impu_boost}} on data with
 missing values. Within each fold, multiple imputation, centering, model
 fitting, and validation are performed in a leakage-avoiding manner to select
 the optimal number of boosting iterations (\code{mstop}). The final model is
-then fitted on multiple imputations of the full dataset at the selected
-stopping iteration.
+then fitted to the multiply imputed datasets derived from the full dataset
+at the selected stopping iteration.
 }
 \details{
 Rows with missing outcomes \code{y} are removed before fold assignment.
